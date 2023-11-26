@@ -32,21 +32,20 @@ def transmit(socket, signal, msg):
 
 ''' Application-layer handshake '''
 def handshake(server):
-    print("Server: Waiting for client connection...")
     socket, addr = server.accept()
     print("Server: Accepted client connection. Shaking hands...")
 
     signal, msg, _ = receive(socket)
-    print(f"Client ({addr[0]}:{addr[1]}) => [{signal}] {msg}")
+    print(f"Client ({addr[0]}:{addr[1]}): [{signal}] {msg}")
     if signal == "REQ":
         socket.setblocking(False)
         data = types.SimpleNamespace(addr=addr, last=b"", inb=b"", outb=b"")
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         sel.register(socket, events, data=data)
 
-        print(f"Server: Shook hands with ({addr[0]}:{addr[1]})\n")
+        print(f"Server: Sending [RAK] to ({data.addr[0]}:{data.addr[1]})")
         transmit(socket, "RAK", "")
-        print(f"Server: Sending [{signal}] => Client: ({data.addr[0]}:{data.addr[1]})")
+        print(f"Server: Shook hands with ({addr[0]}:{addr[1]})\n")
     else:
         print("Server: Expected just [REQ], closing socket...\n")
         socket.close()
@@ -61,7 +60,7 @@ def handle_client(key, mask):
         received = receive(socket)
         if received:
             signal, msg, raw_data = received
-            print(f"Client ({data.addr[0]}:{data.addr[1]}) => [{signal}] {msg}")
+            print(f"Client ({data.addr[0]}:{data.addr[1]}): [{signal}] {msg}")
             if signal == "MSG":
                 for r_key, _ in events:
                     if r_key.data.addr != data.addr:
@@ -76,18 +75,19 @@ def handle_client(key, mask):
             socket.close()
     if mask & selectors.EVENT_WRITE:
         if data.outb:
-            print(f"Server: Echoing {repr(data.outb)} => Client: ({data.addr[0]}:{data.addr[1]})")
+            print(f"Server: Echoing {repr(data.outb)} to ({data.addr[0]}:{data.addr[1]})")
             data_len = socket.send(data.outb)
             data.outb = data.outb[data_len:]
 
 
 ''' ------------------------ MAIN ------------------------ '''
 
-print("Opening transmission socket...")
+print("-------------------------\n")
+print("Opening socket...")
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)     # Create a socket object
 server.bind(server_addr)             # Bind socket to address & port
 server.listen()                                 # Listen for incoming connections
-print(f"Listening on {server_addr[0]}:{server_addr[1]}\n")
+print(f"Listening on {server_addr[0]}:{server_addr[1]}...\n")
 server.setblocking(False)                       # Set socket to non-blocking mode
 sel.register(server, selectors.EVENT_READ, data=None)  # Register server socket with selector
 
