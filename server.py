@@ -1,100 +1,112 @@
 import socket
 import struct
+import selectors
+import types
+
+server_ip = "localhost"
+next_port = 12345
+sel = selectors.DefaultSelector()
 
 
-def send_ack(client_socket):
-    # Pack the message with header fields
-    acknowledgment = "Handshake received"
-    message = struct.pack('!4sHH', b'ACK', len(acknowledgment),
-                          calculate_checksum(acknowledgment)) + acknowledgment.encode('utf-8')
-    client_socket.sendall(message)
+''' Sum ASCII values of character in data; return the 16-bit checksum '''
+def calc_checksum(data): return sum(ord(char) for char in data) & 0xFFFF
 
 
-def receive_hello(client_socket):
-    # Receive the handshake message header
-    header = client_socket.recv(8)
-    message_type, length, checksum = struct.unpack('!4sHH', header)
+''' Receive data '''
+def receive(socket):
+    data = socket.recv(1024)
+    b_checksum = data[:2]
+    checksum = struct.unpack('!H', b_checksum)[0]
+    status = data[2:5].decode()
+    msg = data[5:].decode()
+    if checksum == calc_checksum(status + msg): return (status, msg, data)   # Return status and message if checksum passes
+    return False                                            # Otherwise, indicate corrupted message
 
-    # Receive the handshake message content based on the length
-    hello_message = client_socket.recv(length).decode('utf-8')
 
-    # Verify the checksum
-    if checksum == calculate_checksum(hello_message):
-        return hello_message
+''' Transmit data '''
+def transmit(socket, status, msg):
+    checksum = calc_checksum(status + msg)
+    b_checksum = struct.pack('!H', checksum)
+    data = b_checksum + status.encode() + msg.encode()
+    socket.sendall(data)
+
+
+''' Application-layer handshake '''
+def handshake(server):
+    print("Server: Waiting for client connection...")
+    socket, addr = server.accept()
+    print("Server: Accepted client connection. Shaking hands...")
+
+    status, _, _ = receive(socket)
+    if status == "REQ":
+        socket.setblocking(False)
+        data = types.SimpleNamespace(addr=addr, last=b"", inb=b"", outb=b"")
+        events = selectors.EVENT_READ | selectors.EVENT_WRITE
+        sel.register(socket, events, data=data)
+
+        print(f"Server: Shook hands with ({addr[0]}:{addr[1]})\n")
+        transmit(socket, "RAK", "")
     else:
-        print("Client failed to connect")
-        return None  # Handle checksum verification failure
+        print("Server: Connection unstable, closing socket...\n")
+        socket.close()
 
 
-def calculate_checksum(data):
-    # Calculate the checksum by summing ASCII values of characters
-    checksum = sum(ord(char) for char in data)
-    return checksum & 0xFFFF  # Keep it within a 16-bit range
+''' Handle client communication '''
+def handle_client(key, mask):
+    socket = key.fileobj
+    data = key.data
+
+    if mask & selectors.EVENT_READ:
+        received = receive(socket)
+        if received:
+            status, msg, raw_data = received
+            print(f"Client ({data.addr[0]}:{data.addr[1]}) => [{status}] {msg}")
+            if status == "MSG":
+                for r_key, _ in events:
+                    if r_key.data.addr != data.addr:
+                        r_key.data.outb += raw_data
+                        r_key.data.last = b""
+                        r_key.data.last += raw_data
+            elif status == "NAK":
+                data.outb += data.last
+        else:
+            print(f"Client ({data.addr[0]}:{data.addr[1]}) has disconnected.")
+            sel.unregister(socket)
+            socket.close()
+    if mask & selectors.EVENT_WRITE:
+        if data.outb:
+            print(f"Server: Echoing {repr(data.outb)} => Client: ({data.addr[0]}:{data.addr[1]})")
+            data_len = socket.send(data.outb)
+            data.outb = data.outb[data_len:]
 
 
-def receive_data(client_socket):
-    # Receive the message header
-    header = client_socket.recv(8)
-    message_type, length, checksum = struct.unpack('!4sHH', header)
+''' ------------------------ MAIN ------------------------ '''
 
-    # Receive the message content based on the length
-    data = b""
-    while len(data) < length:
-        chunk = client_socket.recv(length - len(data))
-        if not chunk:
-            break
-        data += chunk
+print("Opening transmission socket...")
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)     # Create a socket object
+server.bind((server_ip, next_port))             # Bind socket to address & port
+server.listen()                                 # Listen for incoming connections
+print(f"Listening on {server_ip}:{next_port}\n")
+server.setblocking(False)                       # Set socket to non-blocking mode
+sel.register(server, selectors.EVENT_READ, data=None)  # Register server socket with selector
 
-    # Verify the checksum
-    if checksum == calculate_checksum(data.decode('utf-8')):
-        # Send a confirmation back to the client
-        confirmation_message = "Message received by the server."
-        client_socket.sendall(confirmation_message.encode('utf-8'))
-        return data.decode('utf-8')
-
-    else:
-        # Send a confirmation back to the client
-        confirmation_message = "Message failed to send. Please retry."
-        client_socket.sendall(confirmation_message.encode('utf-8'))
-        return "Data corrupted."
-
-
-def application_layer_handshake(client_socket):
-    # Receive the handshake ("HELLO") message from the client
-    ack_message = receive_hello(client_socket)
-
-    if ack_message:
-        print("Received ACK message from client:", ack_message)
-        print("Connection established.")
-        send_ack(client_socket)
-        return True
-    else:
-        print("Failed to establish connection.")
-        return False
-
-
-# Create a socket object
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-# Bind the socket to a specific address and port
-server_address = ('localhost', 12345)
-server_socket.bind(server_address)
-
-# Listen for incoming connections
-server_socket.listen(5)
-
-
-# Wait for a connection
-client_socket, client_address = server_socket.accept()
-
-handshake = False
-while not handshake:
-    # Perform the application layer handshake
-    handshake = application_layer_handshake(client_socket)
-
-# Handle the connection (e.g., receive and process messages)
-data = receive_data(client_socket)
-print("Received message from client:", data)
-
-# Close the connection
-client_socket.close()
+try:
+    print("-------------------------")
+    print("| Beginning of Exchange |")
+    print("-------------------------\n")
+    while True:
+        events = sel.select(timeout=None)       # Wait for events
+        for key, mask in events:
+            if key.data is None:
+                handshake(key.fileobj)
+            else:
+                handle_client(key, mask)
+except KeyboardInterrupt:
+    print("Caught keyboard interrupt, exiting...")
+except Exception as e:
+    print(f"An exception occured: {e}\nClosing server...")
+finally:
+    sel.close()
+    server.close()
+    print("Server stopped.")
+    exit()
