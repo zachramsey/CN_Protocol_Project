@@ -15,17 +15,17 @@ def receive(socket):
     data = socket.recv(1024)
     b_checksum = data[:2]
     checksum = struct.unpack('!H', b_checksum)[0]
-    status = data[2:5].decode()
+    signal = data[2:5].decode()
     msg = data[5:].decode()
-    if checksum == calc_checksum(status + msg): return (status, msg)    # Return status and message if checksum passes
+    if checksum == calc_checksum(signal + msg): return (signal, msg)    # Return signal and message if checksum passes
     return False                                                        # Otherwise, indicate corrupted message
 
 
 ''' Transmit data '''
-def transmit(socket, status, msg):
-    checksum = calc_checksum(status + msg)
+def transmit(socket, signal, msg):
+    checksum = calc_checksum(signal + msg)
     b_checksum = struct.pack('!H', checksum)
-    data = b_checksum + status.encode() + msg.encode()
+    data = b_checksum + signal.encode() + msg.encode()
     socket.sendall(data)
 
 
@@ -34,11 +34,11 @@ def handshake(socket):
     print("Requesting connection...")
     transmit(socket, "REQ", "")           # Request connection
     print("Waiting for request acknowledgement...")
-    status, _ = receive(socket)             # Receive response
-    if not status:
+    signal, _ = receive(socket)             # Receive response
+    if not signal:
         print("Failed to establish connection.\n")
         return False
-    elif status == "RAK":
+    elif signal == "RAK":
         print("Successfully established connection.\n")
         return True
 
@@ -57,10 +57,10 @@ try:
             user_input = input("")            # Get user input
             if user_input: transmit(client, "MSG", user_input) # Send message to server
 
-            status, msg = receive(client)                   # Receive message from server
-            if status:
-                if status == "MSG": print("Received: " + msg) # Otherwise, print message
-                elif status == "NAK":                           # If NAK, resend last message
+            signal, msg = receive(client)                   # Receive message from server
+            if signal:
+                if signal == "MSG": print("Received: " + msg) # Otherwise, print message
+                elif signal == "NAK":                           # If NAK, resend last message
                     print("NAK received, resending last message...")
                     transmit(client, "MSG", last_msg)
             else:

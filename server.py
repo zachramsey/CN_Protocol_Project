@@ -16,17 +16,17 @@ def receive(socket):
     data = socket.recv(1024)
     b_checksum = data[:2]
     checksum = struct.unpack('!H', b_checksum)[0]
-    status = data[2:5].decode()
+    signal = data[2:5].decode()
     msg = data[5:].decode()
-    if checksum == calc_checksum(status + msg): return (status, msg, data)   # Return status and message if checksum passes
+    if checksum == calc_checksum(signal + msg): return (signal, msg, data)   # Return signal and message if checksum passes
     return False                                            # Otherwise, indicate corrupted message
 
 
 ''' Transmit data '''
-def transmit(socket, status, msg):
-    checksum = calc_checksum(status + msg)
+def transmit(socket, signal, msg):
+    checksum = calc_checksum(signal + msg)
     b_checksum = struct.pack('!H', checksum)
-    data = b_checksum + status.encode() + msg.encode()
+    data = b_checksum + signal.encode() + msg.encode()
     socket.send(data)
 
 
@@ -36,9 +36,9 @@ def handshake(server):
     socket, addr = server.accept()
     print("Server: Accepted client connection. Shaking hands...")
 
-    status, msg, _ = receive(socket)
-    print(f"Client ({addr[0]}:{addr[1]}) => [{status}] {msg}")
-    if status == "REQ":
+    signal, msg, _ = receive(socket)
+    print(f"Client ({addr[0]}:{addr[1]}) => [{signal}] {msg}")
+    if signal == "REQ":
         socket.setblocking(False)
         data = types.SimpleNamespace(addr=addr, last=b"", inb=b"", outb=b"")
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
@@ -46,7 +46,7 @@ def handshake(server):
 
         print(f"Server: Shook hands with ({addr[0]}:{addr[1]})\n")
         transmit(socket, "RAK", "")
-        print(f"Server: Sending [{status}] => Client: ({data.addr[0]}:{data.addr[1]})")
+        print(f"Server: Sending [{signal}] => Client: ({data.addr[0]}:{data.addr[1]})")
     else:
         print("Server: Expected just [REQ], closing socket...\n")
         socket.close()
@@ -60,15 +60,15 @@ def handle_client(key, mask):
     if mask & selectors.EVENT_READ:
         received = receive(socket)
         if received:
-            status, msg, raw_data = received
-            print(f"Client ({data.addr[0]}:{data.addr[1]}) => [{status}] {msg}")
-            if status == "MSG":
+            signal, msg, raw_data = received
+            print(f"Client ({data.addr[0]}:{data.addr[1]}) => [{signal}] {msg}")
+            if signal == "MSG":
                 for r_key, _ in events:
                     if r_key.data.addr != data.addr:
                         r_key.data.outb += raw_data
                         r_key.data.last = b""
                         r_key.data.last += raw_data
-            elif status == "NAK":
+            elif signal == "NAK":
                 data.outb += data.last
         else:
             print(f"Client ({data.addr[0]}:{data.addr[1]}) has disconnected.")
