@@ -3,8 +3,7 @@ import struct
 import selectors
 import types
 
-server_ip = "localhost"
-next_port = 12345
+server_addr = ("localhost", 12345)
 sel = selectors.DefaultSelector()
 
 
@@ -28,7 +27,7 @@ def transmit(socket, status, msg):
     checksum = calc_checksum(status + msg)
     b_checksum = struct.pack('!H', checksum)
     data = b_checksum + status.encode() + msg.encode()
-    socket.sendall(data)
+    socket.send(data)
 
 
 ''' Application-layer handshake '''
@@ -37,7 +36,8 @@ def handshake(server):
     socket, addr = server.accept()
     print("Server: Accepted client connection. Shaking hands...")
 
-    status, _, _ = receive(socket)
+    status, msg, _ = receive(socket)
+    print(f"Client ({addr[0]}:{addr[1]}) => [{status}] {msg}")
     if status == "REQ":
         socket.setblocking(False)
         data = types.SimpleNamespace(addr=addr, last=b"", inb=b"", outb=b"")
@@ -46,8 +46,9 @@ def handshake(server):
 
         print(f"Server: Shook hands with ({addr[0]}:{addr[1]})\n")
         transmit(socket, "RAK", "")
+        print(f"Server: Sending [{status}] => Client: ({data.addr[0]}:{data.addr[1]})")
     else:
-        print("Server: Connection unstable, closing socket...\n")
+        print("Server: Expected just [REQ], closing socket...\n")
         socket.close()
 
 
@@ -84,9 +85,9 @@ def handle_client(key, mask):
 
 print("Opening transmission socket...")
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)     # Create a socket object
-server.bind((server_ip, next_port))             # Bind socket to address & port
+server.bind(server_addr)             # Bind socket to address & port
 server.listen()                                 # Listen for incoming connections
-print(f"Listening on {server_ip}:{next_port}\n")
+print(f"Listening on {server_addr[0]}:{server_addr[1]}\n")
 server.setblocking(False)                       # Set socket to non-blocking mode
 sel.register(server, selectors.EVENT_READ, data=None)  # Register server socket with selector
 
